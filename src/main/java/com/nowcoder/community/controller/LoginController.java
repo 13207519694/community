@@ -12,12 +12,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
+import org.thymeleaf.context.Context;
 
 import javax.imageio.ImageIO;
 import javax.servlet.http.Cookie;
@@ -26,7 +28,9 @@ import javax.servlet.http.HttpSession;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 @Controller
@@ -45,12 +49,12 @@ public class LoginController implements CommunityConstant {
 
     @RequestMapping(path = "/register", method = RequestMethod.GET)
     public String getRegisterPage() {
-        return "/site/register";
+        return "site/register";
     }
 
     @RequestMapping(path = "/login", method = RequestMethod.GET)
     public String getLoginPage() {
-        return "/site/login";
+        return "site/login";
     }
 
     @RequestMapping(path = "/register", method = RequestMethod.POST)
@@ -59,12 +63,12 @@ public class LoginController implements CommunityConstant {
         if (map == null || map.isEmpty()) {
             model.addAttribute("msg", "注册成功,我们已经向您的邮箱发送了一封激活邮件,请尽快激活!");
             model.addAttribute("target", "/index");
-            return "/site/operate-result";
+            return "site/operate-result";
         } else {
             model.addAttribute("usernameMsg", map.get("usernameMsg"));
             model.addAttribute("passwordMsg", map.get("passwordMsg"));
             model.addAttribute("emailMsg", map.get("emailMsg"));
-            return "/site/register";
+            return "site/register";
         }
     }
 
@@ -82,7 +86,7 @@ public class LoginController implements CommunityConstant {
             model.addAttribute("msg", "激活失败,您提供的激活码不正确!");
             model.addAttribute("target", "/index");
         }
-        return "/site/operate-result";
+        return "site/operate-result";
     }
 
     @RequestMapping(path = "/kaptcha", method = RequestMethod.GET)
@@ -125,7 +129,7 @@ public class LoginController implements CommunityConstant {
         }
         if (StringUtils.isBlank(kaptcha) || StringUtils.isBlank(code) || !kaptcha.equalsIgnoreCase(code)) {
             model.addAttribute("codeMsg", "验证码不正确!");
-            return "/site/login";
+            return "site/login";
         }
 
         // 检查账号,密码
@@ -140,14 +144,79 @@ public class LoginController implements CommunityConstant {
         } else {
             model.addAttribute("usernameMsg", map.get("usernameMsg"));
             model.addAttribute("passwordMsg", map.get("passwordMsg"));
-            return "/site/login";
+            return "site/login";
         }
     }
 
     @RequestMapping(path = "/logout", method = RequestMethod.GET)
     public String logout(@CookieValue("ticket") String ticket) {
         userService.logout(ticket);
+        SecurityContextHolder.clearContext();
         return "redirect:/login"; //重定向默认是get请求
+    }
+
+    // 忘记密码 跳转
+    @RequestMapping(path = "/forget", method = RequestMethod.GET)
+    public String getForgetPage(){
+        return "site/forget";
+    }
+
+    // 忘记密码 异步请求
+    @RequestMapping(path = "/forget-kaptcha/{username}/{email}", method = RequestMethod.GET)
+    public String getForgetKaptcha(@PathVariable("username") String username, @PathVariable("email") String email, Model model){
+        model.addAttribute("username", username);
+        model.addAttribute("email", email);
+
+        Map<String, Object> map = userService.findForgetKaptcha(username, email);
+        if (map == null || map.isEmpty()) {
+            model.addAttribute("kaptchamsg", "我们已经向您的邮箱发送了一封邮件！有效时间2分钟, 请您及时进行操作!");
+            return "site/forget";
+        } else {
+            model.addAttribute("usernameMsg", map.get("usernameMsg"));
+            model.addAttribute("emailMsg", map.get("emailMsg"));
+            return "site/forget";
+        }
+    }
+
+    // 忘记密码 更新密码 userService.updatePassword(int userId, String password)
+    @RequestMapping(path = "/forget", method = RequestMethod.POST)
+    public String updatePassword(String username, String email, String code, String password, Model model){ // model 会自动封存哪些数据？
+        model.addAttribute("username", username);
+        model.addAttribute("email", email);
+        if(StringUtils.isBlank(email)){
+            model.addAttribute("emailmsg", "邮箱不能为空！");
+            return "site/forget";
+        }
+        if(StringUtils.isBlank(username)){
+            model.addAttribute("usernamemsg", "用户名不能为空！");
+            return "site/forget";
+        }
+
+        // 获取redis中的验证码
+        if(StringUtils.isBlank(code)){
+            model.addAttribute("kaptchamsg", "验证码不能为空！");
+            return "site/forget";
+        }
+        String kaptcha = null;
+        String redisKey = RedisKeyUtil.getForgetKey(email);
+        kaptcha = (String) redisTemplate.opsForValue().get(redisKey);
+        if (StringUtils.isBlank(kaptcha) || !kaptcha.equalsIgnoreCase(code)) {
+            model.addAttribute("kaptchamsg", "验证码不正确!");
+            return "site/forget";
+        }
+
+        // 更新密码
+        if(StringUtils.isBlank(password)){
+            model.addAttribute("passwordmsg", "新密码不得为空!");
+            return "site/forget";
+        }
+        User user = userService.findUserByName(username);
+        user.setPassword(CommunityUtils.md5(password + user.getSalt()));
+        userService.updatePassword(user.getId(), user.getPassword());
+
+        // 清空验证码
+
+        return "site/login";
     }
 
 }

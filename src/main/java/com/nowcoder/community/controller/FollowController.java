@@ -1,7 +1,9 @@
 package com.nowcoder.community.controller;
 
+import com.nowcoder.community.entity.Event;
 import com.nowcoder.community.entity.Page;
 import com.nowcoder.community.entity.User;
+import com.nowcoder.community.events.EventProducer;
 import com.nowcoder.community.service.FollowService;
 import com.nowcoder.community.service.UserService;
 import com.nowcoder.community.util.CommunityConstant;
@@ -30,12 +32,24 @@ public class FollowController implements CommunityConstant {
     @Autowired
     private UserService userService;
 
+    @Autowired
+    private EventProducer eventProducer;
+
     @RequestMapping(path = "/follow", method = RequestMethod.POST)
     @ResponseBody
     public String follow(int entityType, int entityId) {
         User user = hostHolder.getUser();
 
         followService.follow(user.getId(), entityType, entityId);
+
+        // 触发关注事件（取消关注不通知）
+        Event event = new Event()
+                .setTopic(TOPIC_FOLLOW)
+                .setUserId(hostHolder.getUser().getId())
+                .setEntityType(entityType)
+                .setEntityUserId(entityId) // 当前只能关注人
+                .setEntityId(entityId);
+        eventProducer.fireEvent(event);
 
         return CommunityUtils.getJSONString(0, "已关注!");
     }
@@ -71,7 +85,7 @@ public class FollowController implements CommunityConstant {
         }
         model.addAttribute("users", userList);
 
-        return "/site/followee";
+        return "site/followee";
     }
 
     @RequestMapping(path = "/followers/{userId}", method = RequestMethod.GET)
@@ -95,7 +109,7 @@ public class FollowController implements CommunityConstant {
         }
         model.addAttribute("users", userList);
 
-        return "/site/follower";
+        return "site/follower";
     }
 
     private boolean hasFollowed(int userId) {

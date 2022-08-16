@@ -12,15 +12,14 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Service;
+import org.springframework.ui.Model;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
 import javax.swing.*;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -106,7 +105,7 @@ public class UserService implements CommunityConstant {
         // http://localhost:8080/community/activation/101/code
         String url = domain + contextPath + "/activation/" + user.getId() + "/" + user.getActivationCode();
         context.setVariable("url", url);
-        String content = templateEngine.process("/mail/activation", context);
+        String content = templateEngine.process("mail/activation", context);
         mailClient.sendMail(user.getEmail(), "激活账号", content);
 
         return map;
@@ -224,4 +223,87 @@ public class UserService implements CommunityConstant {
         redisTemplate.delete(redisKey);
     }
 
+    public Collection<? extends GrantedAuthority> getAuthorities(int userId) {
+        User user = this.findUserById(userId);
+
+        List<GrantedAuthority> list = new ArrayList<>();
+        list.add(new GrantedAuthority() {
+
+            @Override
+            public String getAuthority() {
+                switch (user.getType()) {
+                    case 1:
+                        return AUTHORITY_ADMIN;
+                    case 2:
+                        return AUTHORITY_MODERATOR;
+                    default:
+                        return AUTHORITY_USER;
+                }
+            }
+        });
+        return list;
+    }
+
+    public User findUserByEmail(String email){
+        return userMapper.selectByEmail(email);
+    }
+
+    public Map<String, Object> findForgetKaptcha(String username, String email){
+        Map<String, Object> map = new HashMap<>();
+        // 空值处理
+        if (StringUtils.isBlank(username)) {
+            map.put("usernameMsg", "账号不能为空!");
+            return map;
+        }
+        if (StringUtils.isBlank(email)) {
+            map.put("emailMsg", "邮箱不能为空!");
+            return map;
+        }
+
+        // 验证账号
+        User u = this.findUserByName(username);
+        if (u == null) {
+            map.put("usernameMsg", "该账号不存在!");
+            return map;
+        }
+        // 验证邮箱
+        if (!email.equals(u.getEmail())) {
+            map.put("emailMsg", "该邮箱不是注册的邮箱!");
+            return map;
+        }
+
+        // 验明无误 发送邮件给一个验证码
+        // 生成随机的4位验证码
+        String code = generateValidateCode(4).toString();
+        // 激活邮件
+        Context context = new Context();
+        context.setVariable("email", email);
+        context.setVariable("code", code);
+        String content = templateEngine.process("mail/forget", context);
+        mailClient.sendMail(email, "忘记密码", content);
+
+        // 验证码存入Redis
+        String redisKey = RedisKeyUtil.getForgetKey(email);
+        redisTemplate.opsForValue().set(redisKey, code, 120, TimeUnit.SECONDS);
+
+        return map;
+    }
+
+    private Integer generateValidateCode(int length){
+        Integer code =null;
+        if(length == 4){
+            code = new Random().nextInt(9999);//生成随机数，最大为9999
+            if(code < 1000){
+                code = code + 1000;//保证随机数为4位数字
+            }
+        }else if(length == 6){
+            code = new Random().nextInt(999999);//生成随机数，最大为999999
+            if(code < 100000){
+                code = code + 100000;//保证随机数为6位数字
+            }
+        }else{
+            throw new RuntimeException("只能生成4位或6位数字验证码");
+        }
+        return code;
+    }
 }

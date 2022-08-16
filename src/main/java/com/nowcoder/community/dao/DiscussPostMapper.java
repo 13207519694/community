@@ -15,7 +15,7 @@ import java.util.List;
 public interface DiscussPostMapper {
 
     //分页查询帖子
-    List<DiscussPost> selectDiscussPosts(int userId, int offset, int limit); //, int orderMode
+    List<DiscussPost> selectDiscussPosts(int userId, int offset, int limit, int orderMode);
 
     //查询帖子的行数(Param注解用于给起始参数取别名；如果只有一个参数，并且在<if>里面使用，测必须加别名）
     int selectDiscussPostRows(@Param("userId") int userId);
@@ -26,11 +26,11 @@ public interface DiscussPostMapper {
 
     int updateCommentCount(int id, int commentCount);
 
-//    int updateType(int id, int type);
-//
-//    int updateStatus(int id, int status);
-//
-//    int updateScore(int id, double score);
+    int updateType(int id, int type);
 
+    int updateStatus(int id, int status);
 
+    int updateScore(int id, double score);
+
+//    List<DiscussPost> selectMyPosts(int userId, int offset, int limit);
 }

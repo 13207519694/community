@@ -1,6 +1,7 @@
 package com.nowcoder.community.controller;
 
 import com.nowcoder.community.annotation.LoginRequired;
+import com.nowcoder.community.entity.Page;
 import com.nowcoder.community.entity.User;
 import com.nowcoder.community.service.FollowService;
 import com.nowcoder.community.service.LikeService;
@@ -56,7 +57,7 @@ public class UserController implements CommunityConstant {
     @LoginRequired
     @RequestMapping(path = "/setting", method = RequestMethod.GET)
     public String getSettingPage() {
-        return "/site/setting";
+        return "site/setting";
     }
 
     @LoginRequired
@@ -64,20 +65,27 @@ public class UserController implements CommunityConstant {
     public String uploadHeader(MultipartFile headerImage, Model model) {
         if (headerImage == null) {
             model.addAttribute("errorheaderurl", "您还没有选择图片!");
-            return "/site/setting";
+            return "site/setting";
         }
+
+        System.out.println("头像传过来了");
 
         String fileName = headerImage.getOriginalFilename();
         String suffix = fileName.substring(fileName.lastIndexOf(".")); //获取后缀
         if (StringUtils.isBlank(suffix)) {
             model.addAttribute("errorheaderurl", "文件的格式不正确!");
-            return "/site/setting";
+            return "site/setting";
         }
+
+        System.out.println("文件格式正确，后缀获取到了");
 
         // 生成随机文件名
         fileName = CommunityUtils.generateUUID() + suffix;
         // 确定文件存放的路径
         File dest = new File(uploadPath + "/" + fileName);
+
+        System.out.println("文件路径已建立");
+
         try {
             // 存储文件
             headerImage.transferTo(dest);
@@ -86,11 +94,15 @@ public class UserController implements CommunityConstant {
             throw new RuntimeException("上传文件失败,服务器发生异常!", e);
         }
 
+        System.out.println("文件上传完毕");
+
         // 更新当前用户的头像的路径(web访问路径)
         // http://localhost:8080/community/user/header/xxx.png
         User user = hostHolder.getUser();
         String headerUrl = domain + contextPath + "/user/header/" + fileName;
         userService.updateHeader(user.getId(), headerUrl);
+
+        System.out.println("数据库头像更新完毕");
 
         return "redirect:/index";
     }
@@ -100,25 +112,25 @@ public class UserController implements CommunityConstant {
     public String uploadPassword(String oldpassword, String newpassword, String confirmpassword, Model model) {
         if(StringUtils.isBlank(oldpassword)){
             model.addAttribute("erroroldpassword", "原密码为空!");
-            return "/site/setting";
+            return "site/setting";
         }
         if(StringUtils.isBlank(newpassword)){
             model.addAttribute("errornewpassword", "新密码为空!");
-            return "/site/setting";
+            return "site/setting";
         }
         if(StringUtils.isBlank(confirmpassword)){
             model.addAttribute("errorconfirmpassword", "确认密码为空!");
-            return "/site/setting";
+            return "site/setting";
         }
         if(!StringUtils.equals(newpassword, confirmpassword)){
             model.addAttribute("errorconfirmpassword", "两次密码输入不相等!");
-            return "/site/setting";
+            return "site/setting";
         }
         User user = hostHolder.getUser(); //已经是从redis中取的user
         oldpassword = CommunityUtils.md5(oldpassword + user.getSalt());
         if(!StringUtils.equals(oldpassword, user.getPassword())){
             model.addAttribute("erroroldpassword", "原密码不正确!");
-            return "/site/setting";
+            return "site/setting";
         }
 //        user.setSalt(CommunityUtils.generateUUID().substring(0, 5)); //加密尾缀（还用原来的尾缀）
         user.setPassword(CommunityUtils.md5(newpassword + user.getSalt()));
@@ -176,7 +188,7 @@ public class UserController implements CommunityConstant {
         }
         model.addAttribute("hasFollowed", hasFollowed);
 
-        return "/site/profile";
+        return "site/profile";
     }
 
 }

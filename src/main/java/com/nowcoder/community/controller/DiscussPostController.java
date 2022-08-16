@@ -1,9 +1,7 @@
 package com.nowcoder.community.controller;
 
-import com.nowcoder.community.entity.Comment;
-import com.nowcoder.community.entity.DiscussPost;
-import com.nowcoder.community.entity.Page;
-import com.nowcoder.community.entity.User;
+import com.nowcoder.community.entity.*;
+import com.nowcoder.community.events.EventProducer;
 import com.nowcoder.community.service.CommentService;
 import com.nowcoder.community.service.DiscussPostService;
 import com.nowcoder.community.service.LikeService;
@@ -11,7 +9,9 @@ import com.nowcoder.community.service.UserService;
 import com.nowcoder.community.util.CommunityConstant;
 import com.nowcoder.community.util.CommunityUtils;
 import com.nowcoder.community.util.HostHolder;
+import com.nowcoder.community.util.RedisKeyUtil;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -40,6 +40,12 @@ public class DiscussPostController implements CommunityConstant {
     @Autowired
     private LikeService likeService;
 
+    @Autowired
+    private EventProducer eventProducer;
+
+    @Autowired
+    private RedisTemplate redisTemplate;
+
     @RequestMapping(path = "/add", method = RequestMethod.POST)
     @ResponseBody
     public String addDiscussPost(String title, String content) {
@@ -55,12 +61,27 @@ public class DiscussPostController implements CommunityConstant {
         post.setCreateTime(new Date());
         discussPostService.addDiscussPost(post);
 
+        // 触发发帖事件
+        Event event = new Event()
+                .setTopic(TOPIC_PUBLISH)
+                .setUserId(user.getId())
+                .setEntityType(ENTITY_TYPE_POST)
+                .setEntityId(post.getId());
+        eventProducer.fireEvent(event);
+
+        // 计算帖子分数
+        String redisKey = RedisKeyUtil.getPostScoreKey();
+        redisTemplate.opsForSet().add(redisKey, post.getId()); //Set 不需要重复计算
+
         // 报错的情况,将来统一处理.
         return CommunityUtils.getJSONString(0, "发布成功!");
     }
 
     @RequestMapping(path = "/detail/{discussPostId}", method = RequestMethod.GET)
     public String getDiscussPost(@PathVariable("discussPostId") int discussPostId, Model model, Page page) {
+        // 置顶加精删除显示User
+        User userType = hostHolder.getUser();
+        model.addAttribute("userType", userType);
         // 帖子
         DiscussPost post = discussPostService.findDiscussPostById(discussPostId);
         model.addAttribute("post", post);
@@ -143,7 +164,105 @@ public class DiscussPostController implements CommunityConstant {
 
         model.addAttribute("comments", commentVoList);
 
-        return "/site/discuss-detail";
+        return "site/discuss-detail";
+    }
+
+    // 置顶updateType
+    @RequestMapping(path = "/top", method = RequestMethod.POST)
+    @ResponseBody
+    public String setTop(int id) {
+        DiscussPost discussPostById = discussPostService.findDiscussPostById(id);
+        int type = discussPostById.getType()^1;
+
+        discussPostService.updateType(id, type);
+
+        Map<String, Object> map = new HashMap<>();
+        map.put("type", type);
+
+        // 触发发帖事件
+        Event event = new Event()
+                .setTopic(TOPIC_PUBLISH)
+                .setUserId(hostHolder.getUser().getId())
+                .setEntityType(ENTITY_TYPE_POST)
+                .setEntityId(id);
+        eventProducer.fireEvent(event);
+
+        return CommunityUtils.getJSONString(0, null, map);
+    }
+
+    // 加精updateStatus 1
+    @RequestMapping(path = "/wonderful", method = RequestMethod.POST)
+    @ResponseBody
+    public String setWonderful(int id) {
+        DiscussPost discussPostById = discussPostService.findDiscussPostById(id);
+        int status = discussPostById.getStatus()^1;
+
+        discussPostService.updateStatus(id, status);
+
+        Map<String, Object> map = new HashMap<>();
+        map.put("status", status);
+
+        // 触发发帖事件
+        Event event = new Event()
+                .setTopic(TOPIC_PUBLISH)
+                .setUserId(hostHolder.getUser().getId())
+                .setEntityType(ENTITY_TYPE_POST)
+                .setEntityId(id);
+        eventProducer.fireEvent(event);
+
+        // 计算帖子分数
+        String redisKey = RedisKeyUtil.getPostScoreKey();
+        redisTemplate.opsForSet().add(redisKey, id);
+
+        return CommunityUtils.getJSONString(0, null, map);
+    }
+
+    // 删除updateStatus 2
+    @RequestMapping(path = "/delete", method = RequestMethod.POST)
+    @ResponseBody
+    public String setDelete(int id) {
+        discussPostService.updateStatus(id, 2);
+
+        // 触发删帖事件
+        Event event = new Event()
+                .setTopic(TOPIC_DELETE)
+                .setUserId(hostHolder.getUser().getId())
+                .setEntityType(ENTITY_TYPE_POST)
+                .setEntityId(id);
+        eventProducer.fireEvent(event);
+
+        return CommunityUtils.getJSONString(0);
+    }
+
+    // 我的贴子
+    @RequestMapping(path = "/my-post/{userId}", method = RequestMethod.GET)
+    public String getMyPostPage(Model model, Page page, @PathVariable("userId") int userId) {
+
+        model.addAttribute("userId", userId);
+
+        page.setRows(discussPostService.findDiscussPostRows(userId));
+        page.setPath("/discuss/my-post/" + userId);
+
+        List<DiscussPost> discussPosts = discussPostService.findDiscussPosts(userId, page.getOffset(), page.getLimit(), 0);
+        List<Map<String, Object>> myDiscussPosts = new ArrayList<>(); //因为要组装likeCount所以新建了一个map
+        if (discussPosts != null) {
+            for (DiscussPost post : discussPosts) {
+                Map<String, Object> map = new HashMap<>();
+                map.put("post", post);
+
+                long likeCount = likeService.findEntityLikeCount(ENTITY_TYPE_POST, post.getId());
+                map.put("likeCount", likeCount);
+
+                myDiscussPosts.add(map);
+            }
+        }
+
+        model.addAttribute("myPosts", myDiscussPosts);
+
+        int discussPostRows = discussPostService.findDiscussPostRows(userId);
+        model.addAttribute("postRows",discussPostRows);
+
+        return "site/my-post";
     }
 
 }
